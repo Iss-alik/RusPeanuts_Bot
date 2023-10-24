@@ -1,79 +1,84 @@
-import telebot
-from telebot import types
-import constans
+from aiogram import Bot, Dispatcher
+from aiogram.types import *
+from aiogram.filters import Command
+
 import structural.adapter
+import constans
 import structural.what_num
 from datetime import datetime
 import random
 
-bot = telebot.TeleBot(constans.TOKEN)
-delta = 1
-global cur_num
-cur_num = structural.what_num.num_from_url(url=constans.BASE)
+# Вставляем токен из файла с константами
+BOT_TOKEN = constans.TOKEN
+
+bot = Bot(BOT_TOKEN)
+dp = Dispatcher()
+
+delta =1 
+global cur_num 
+cur_num = structural.what_num.num_from_url(url=constans.BASE) # сразу присваиваем дату последнего стрипа с acomics, потому что /start выдает последний стрип
 lst_num = cur_num
 
-@bot.message_handler(commands=['help'])
-def help_message(message):
-    bot.send_message(message.chat.id, text= "На данный момент бот способен показать: 1) последний стрип на акомиксе через '/start' 2) предыдущий стрип '<' 3)слуйчайный стрип '()'  4) следующий стрип '>'")
+# генерации клавиатур с инлайн-кнопками
+menu= [
+[
+    InlineKeyboardButton(text='⏪', callback_data= 'first'),
+    InlineKeyboardButton(text='◀️', callback_data= 'previous'),
+    InlineKeyboardButton(text='🔄', callback_data= 'random'),
+    InlineKeyboardButton(text='▶️', callback_data= 'next'),
+    InlineKeyboardButton(text='⏩', callback_data= 'last')
+]
+]
+menu = InlineKeyboardMarkup(inline_keyboard=menu)
 
-@bot.message_handler(commands=['start'])
-def get_text_message(message):
 
-    km = types.InlineKeyboardMarkup(row_width=3)
-    previous = types.InlineKeyboardButton(text="<", callback_data="previous")
-    rnd = types.InlineKeyboardButton(text="()", callback_data="rnd")
-    next= types.InlineKeyboardButton(text=">", callback_data="next")
-    km.add(previous, rnd, next)
+# Реагирует на /start и выдает последний стрип на acomics
+@dp.message(Command("start"))
+async def start_handler(msg:Message):
 
     structural.adapter.url_to_square(url=constans.BASE)
 
+    request = FSInputFile("request.png") # Открываем файл 
+    issueName = structural.what_num.issueName(url=constans.BASE + '/' +str(cur_num)) # Достаем дату выпуска с acomics
+    await msg.answer_photo(request, reply_markup=menu, caption = issueName)
 
-    img = 'request.png'
-    file = open(img, 'rb')
-    bot.send_photo(message.chat.id, file, "Самое горячее, самое актруальное", reply_markup= km) 
 
-@bot.callback_query_handler(func = lambda callback: callback.data)
-def update(callback):
+# Этот хэндлер будет срабатывать на нажатие инлайн-кнопки
+@dp.callback_query()
+async def process_button_press(query: CallbackQuery, bot: Bot):
     global cur_num
-    km = types.InlineKeyboardMarkup(row_width=3)
-    previous = types.InlineKeyboardButton(text="<", callback_data="previous")
-    rnd = types.InlineKeyboardButton(text="()", callback_data="rnd")
-    next= types.InlineKeyboardButton(text=">", callback_data="next")
-    km.add(previous, rnd, next)
 
-    if  callback.data == 'previous':
+    if query.data == 'first':
+        cur_num = 1
+
+    elif  query.data == 'previous' and cur_num !=1:
         cur_num -= delta
 
-    elif callback.data == 'next':
-        cur_num += delta
-    
-    elif callback.data == 'rnd':
+    elif query.data == 'random':
         cur_num  = random.randint(1,lst_num+1)
+
+    elif query.data == 'next' and cur_num != lst_num:
+        cur_num += delta
+        
+    elif query.data == 'last':
+        cur_num = lst_num
     
-    structural.adapter.url_to_square(url=constans.BASE + '/' +str(cur_num))
+    structural.adapter.url_to_square(url=constans.BASE + '/' +str(cur_num)) # Достаем стрип с номером = cur_num
+    request = FSInputFile("request.png")
+    issueName = structural.what_num.issueName(url=constans.BASE + '/' +str(cur_num)) # Достаем дату выпуска
 
-    img = 'request.png'
-    file = open(img, 'rb')
+    await query.message.answer_photo(request, reply_markup=menu, caption= issueName) # Отправляем стрип
+    await query.message.delete() # Удаляем предыдущие сообщение 
 
-    bot.send_photo(callback.message.chat.id, file, reply_markup=km)
+@dp.message(Command("help"))
+async def help(msg:Message):
+    await msg.answer("/start - запуск бота, /date - Стрип по определеной дате, /bookmark - сделать закладку")
 
-@bot.message_handler(commands='date')
-def strip_of_date(message):
-    query = message.text.split(' ')
-    q_date = datetime.strptime(query[1], '%Y-%m-%d')
-    q_num = structural.what_num.num_of_date(cur_date= q_date)
+# Этот хэндлер будет срабатывать на все остальные сообщения
+@dp.message()
+async def send_echo(message: Message):
+    await message.answer(text='Не понимаю')
 
-    km = types.InlineKeyboardMarkup(row_width=3)
-    previous = types.InlineKeyboardButton(text="<", callback_data="previous")
-    rnd = types.InlineKeyboardButton(text="()", callback_data="rnd")
-    next= types.InlineKeyboardButton(text=">", callback_data="next")
-    km.add(previous, rnd, next)
 
-    structural.adapter.url_to_square(url=constans.BASE + '/' +str(q_num))
-
-    img = 'request.png'
-    file = open(img, 'rb')
-
-    bot.send_photo(message.chat.id, file, reply_markup=km)
-
-bot.polling()
+if __name__ == '__main__':
+    dp.run_polling(bot)
